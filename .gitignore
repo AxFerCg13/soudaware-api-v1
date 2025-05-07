@@ -1,0 +1,46 @@
+# Entorno virtual
+venv/
+.env/
+.env.*  
+
+# Archivos de Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Archivos de logs y cachés
+*.log
+*.sqlite3
+*.db
+*.pot
+*.pyc
+*.pkl
+*.h5
+*.tflite
+
+# Archivos de configuración de IDEs
+.vscode/
+.idea/
+*.code-workspace
+
+# Archivos temporales
+*.swp
+.DS_Store
+Thumbs.db
+
+# Archivos de dependencias (opcional si los regeneras con pip freeze)
+pip-log.txt
+
+# Archivos generados por TensorFlow
+checkpoint
+*.ckpt
+*.pb
+events.out.*
+__MACOSX/
+
+# Compilaciones de Cython o extensiones
+build/
+dist/
+*.egg-info/
