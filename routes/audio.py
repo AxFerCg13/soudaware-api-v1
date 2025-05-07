@@ -1,23 +1,18 @@
 from fastapi import APIRouter, UploadFile, File
 from fastapi.responses import JSONResponse
+from services.audio_processor import AudioProcessor
+from io import BytesIO
 
 audio = APIRouter()
+audio_processor = AudioProcessor(desired_sample_rate=16000)
 
 @audio.post("/audio")
-async def upload_file(file: UploadFile = File(...)):
-    try:
-        print(file)
-        with open(file.filename, "wb") as audioWav:
-            content = await file.read()
-            print(content)
-        
-        return JSONResponse(content={
-            "success": True,
-        }, status_code=200)
-
-    except FileNotFoundError:
-        return JSONResponse(content=
-                            {
-                                "success": False,
-                            }, status_code=404)
-    return "Hello world"
+async def process_audio(file: UploadFile = File(...)):
+    audio_file = await file.read()
+    
+    result = audio_processor.process_audio_file(BytesIO(audio_file))
+    
+    return JSONResponse(content={
+        "class": result["class"],
+        "confidence": result["confidence"],
+    })
