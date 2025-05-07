@@ -3,6 +3,7 @@ import tensorflow as tf
 import tensorflow_hub as hub
 import csv
 import urllib.request
+import datetime
 
 class AudioProcessor:
     def __init__(self, desired_sample_rate=16000):
@@ -29,7 +30,6 @@ class AudioProcessor:
             desired_length = int(round(float(len(waveform)) / original_sample_rate * self.desired_sample_rate))
             waveform = scipy.signal.resample(waveform, desired_length)
         return self.desired_sample_rate, waveform
-
     def process_audio_file(self, audio_file):
         # Decode wav file
         audio_bytes = audio_file.read()
@@ -53,4 +53,10 @@ class AudioProcessor:
         return {
             "class": self.class_names[top_class],
             "confidence": mean_scores[top_class].numpy().item(),
+            "date": self.date_alert() 
         }
+
+    def date_alert(self):  
+        x = datetime.datetime.now()
+        date = x.strftime("%w") + " " + x.strftime("%B") + " of " + x.strftime("%Y") + ", "+  x.strftime("%I") + ":" + x.strftime("%M") + x.strftime("%p")
+        return date

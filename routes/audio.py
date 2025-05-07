@@ -14,5 +14,6 @@ async def process_audio(file: UploadFile = File(...)):
     
     return JSONResponse(content={
         "class": result["class"],
+        "date": result["date"],
         "confidence": result["confidence"],
     })
