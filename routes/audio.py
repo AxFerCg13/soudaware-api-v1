@@ -16,7 +16,7 @@ async def process_audio(file: UploadFile = File(...)):
     try:
         logger.info(f"Iniciando procesamiento de archivo: {file.filename}")
         
-        if not file.filename.lower().endswith(('.wav')):
+        if not file.filename.lower().endswith(('.wav', '.mp3')):
             error_msg = "Formato de archivo no soportado"
             logger.error(error_msg)
             raise HTTPException(status_code=400, detail=error_msg)

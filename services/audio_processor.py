@@ -4,6 +4,9 @@ import tensorflow_hub as hub
 import csv
 import urllib.request
 import datetime
+import io
+import librosa
+import numpy as np
 
 class AudioProcessor:
     def __init__(self, desired_sample_rate=16000):
@@ -30,9 +33,9 @@ class AudioProcessor:
             desired_length = int(round(float(len(waveform)) / original_sample_rate * self.desired_sample_rate))
             waveform = scipy.signal.resample(waveform, desired_length)
         return self.desired_sample_rate, waveform
-    def process_audio_file(self, audio_file):
-        # Decode wav file
-        audio_bytes = audio_file.read()
+
+    def _process_wav(self, audio_bytes):
+        """Procesa archivos WAV (funcionalidad original)"""
         waveform, sample_rate = tf.audio.decode_wav(audio_bytes)
         sample_rate = sample_rate.numpy()
         
@@ -41,20 +44,49 @@ class AudioProcessor:
             waveform = tf.reduce_mean(waveform, axis=1, keepdims=True)
         
         _, waveform = self.ensure_sample_rate(sample_rate, waveform)
+        return tf.squeeze(waveform, axis=-1)
+
+    def _process_mp3(self, audio_bytes):
+        """Procesa archivos MP3"""
+        audio_bytes_io = io.BytesIO(audio_bytes)
+        waveform, sample_rate = librosa.load(audio_bytes_io, sr=self.desired_sample_rate, mono=True)
         
-        waveform = tf.squeeze(waveform, axis=-1)
-        
-        # Do prediction
-        scores, embeddings, spectrogram = self.model(waveform)
-        
-        mean_scores = tf.reduce_mean(scores, axis=0)
-        top_class = tf.argmax(mean_scores)
-        
-        return {
-            "class": self.class_names[top_class],
-            "confidence": mean_scores[top_class].numpy().item(),
-            "date": self.date_alert() 
-        }
+        # Convertir a tensor de TensorFlow
+        waveform = tf.convert_to_tensor(waveform, dtype=tf.float32)
+        return waveform
+
+    def process_audio_file(self, audio_file):
+        try:
+            # Leer los bytes del archivo directamente como binario
+            audio_bytes = audio_file.read()
+            
+            # Verificar si es MP3 por los primeros bytes (magic numbers)
+            is_mp3 = False
+            if len(audio_bytes) > 2:
+                # MP3 puede comenzar con ID3 (para metadata) o 0xFF 0xFB (frame sync)
+                if audio_bytes[:3] == b'ID3' or (audio_bytes[0] == 0xFF and (audio_bytes[1] & 0xE0) == 0xE0):
+                    is_mp3 = True
+            
+            # Procesar según el tipo de archivo
+            if is_mp3:
+                waveform = self._process_mp3(audio_bytes)
+            else:
+                try:
+                    waveform = self._process_wav(audio_bytes)
+                except tf.errors.InvalidArgumentError:
+                    waveform = self._process_mp3(audio_bytes)
+            
+            scores, embeddings, spectrogram = self.model(waveform)
+            mean_scores = tf.reduce_mean(scores, axis=0)
+            top_class = tf.argmax(mean_scores)
+            
+            return {
+                "class": self.class_names[top_class],
+                "confidence": mean_scores[top_class].numpy().item(),
+                "date": self.date_alert() 
+            }
+        except Exception as e:
+            raise ValueError(f"Error procesando archivo de audio: {str(e)}")
 
     def date_alert(self):  
         x = datetime.datetime.now()
