@@ -42,8 +42,11 @@ async def process_audio(file: UploadFile = File(...)):
             error_msg = f"Estructura de resultado inválida. Esperado: {required_keys}, Obtenido: {result.keys()}"
             raise HTTPException(status_code=500, detail=error_msg)
         
+        if result["confidence"] < 0.39:
+            result["class"] = "Loud Sound"
+
         response_data = {
-            "class": result["class"],
+            "classMessage": result["class"],
             "date": result["date"],
             "confidence": result["confidence"],
         }
