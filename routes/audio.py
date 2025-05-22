@@ -2,7 +2,9 @@ from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 from services.audio_processor import AudioProcessor
 from io import BytesIO
+from googletrans import Translator
 import logging
+import numpy as np
 
 audio = APIRouter()
 audio_processor = AudioProcessor(desired_sample_rate=16000)
@@ -32,24 +34,47 @@ async def process_audio(file: UploadFile = File(...)):
         
         # Procesamiento del audio
         try:
-            result = audio_processor.process_audio_file(BytesIO(audio_file))
+            result = await audio_processor.process_audio_file(BytesIO(audio_file))
         except Exception as e:
             error_msg = f"Error en AudioProcessor: {str(e)}"
             raise HTTPException(status_code=500, detail=error_msg)
         
-        required_keys = ["class", "date", "confidence"]
+        required_keys = ["class", "date", "confidence", "is_alarm"]
         if not all(key in result for key in required_keys):
             error_msg = f"Estructura de resultado inválida. Esperado: {required_keys}, Obtenido: {result.keys()}"
             raise HTTPException(status_code=500, detail=error_msg)
         
-        if result["confidence"] < 0.39:
-            result["class"] = "Loud Sound"
+        # Convertir valores numéricos a tipos nativos de Python
+        def convert_value(v):
+            if hasattr(v, 'item'):  # Para numpy/tensorflow types
+                return v.item()
+            elif isinstance(v, (np.generic, np.ndarray)):  # Para numpy arrays/scalars
+                return v.tolist()
+            return v
+        
+        # Aplicar la conversión a todos los valores numéricos
+        processed_result = {k: convert_value(v) for k, v in result.items()}
+        
+        if processed_result["confidence"] < 0.19:
+            processed_result["class"] = "Loud Sound"
 
+        # Construir respuesta base
         response_data = {
-            "classMessage": result["class"],
-            "date": result["date"],
-            "confidence": result["confidence"],
+            "is_alarm": processed_result["is_alarm"],
+            "classMessage": processed_result["class"],
+            "confidence": processed_result["confidence"],
+            "context_sounds": processed_result.get("context_sounds", []),
+            "date": processed_result["date"],
         }
+
+        # Solo incluir campos avanzados si es una alarma
+        if processed_result["is_alarm"]:
+            response_data.update({
+                "urgency_level": processed_result.get("urgency_level"),
+                "description": processed_result.get("description"),
+                "volume_level": processed_result.get("volume_level"),
+                "repetition_pattern": processed_result.get("repetition_pattern"),
+            })
         
         return JSONResponse(content=response_data)
         
