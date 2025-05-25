@@ -2,6 +2,7 @@
 venv/
 .env/
 .env.*  
+services/soundaware.json
 
 # Archivos de Python
 __pycache__/

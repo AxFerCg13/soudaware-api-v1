@@ -11,7 +11,14 @@ from googletrans import Translator
 from deep_translator import GoogleTranslator
 from datetime import datetime
 import pytz
+import firebase_admin
+from firebase_admin import credentials
+from firebase_admin import firestore
 
+# Initialize Firebase Admin (do this only once)
+cred = credentials.Certificate('./services/soundaware.json')  # <- Change this path
+firebase_admin.initialize_app(cred)
+db = firestore.client()
 
 class SoundClassData:
     # Lista de alarmas / sonidos de emergencia
@@ -245,6 +252,7 @@ class AudioProcessor:
         description = self.sound_data.SOUND_DESCRIPTIONS.get(sound_class, sound_class)
         
         return adjusted_urgency, confidence, description
+
     def _convert_to_native_types(self, data):
         """Convierte los valores numéricos a tipos nativos de Python para serialización JSON"""
         if isinstance(data, (np.generic, np.ndarray)):
@@ -257,7 +265,7 @@ class AudioProcessor:
             return [self._convert_to_native_types(item) for item in data]
         return data
 
-    async def process_audio_file(self, audio_file):
+    async def process_audio_file(self, audio_file, user_id=None, location=None):
         try:
             audio_bytes = audio_file.read()
             is_mp3 = False
@@ -296,14 +304,22 @@ class AudioProcessor:
             # Verificar si el sonido es una alarma
             is_alarm = self.is_alarm_sound(predicted_class, context_sounds, confidence_score)
             
+            result = {
+                "is_alarm": is_alarm,
+                "class": translated_class,
+                "original_class": predicted_class,
+                "confidence": confidence_score,
+                "context_sounds": context_sounds,
+                "date": self.date_alert(),
+                "volume_level": volume_level,
+                "timestamp": datetime.now(pytz.timezone("America/Mexico_City")).isoformat()
+            }
+
+            if location:
+                result["location"] = location
+
             if not is_alarm:
-                result = {
-                    "is_alarm": False,
-                    "class": translated_class,
-                    "confidence": confidence_score,
-                    "context_sounds": context_sounds,
-                    "date": self.date_alert()
-                }
+                result["message"] = "No se detectó sonido de alarma"
             else:
                 if predicted_class not in self.sound_data.ALARM_CLASSES:
                     best_alarm_class, best_alarm_confidence = self.find_highest_confidence_alarm(scores_np_mean, self.class_names)
@@ -317,27 +333,45 @@ class AudioProcessor:
                     predicted_class, volume_level, repetition_pattern, context_sounds
                 )
                 
-                # Traducción síncrona (googletrans no es asíncrono)
-                translated_date= self.translator.translate(self.date_alert(), src='en', dest='es').text
+                translated_date = self.translator.translate(self.date_alert(), src='en', dest='es').text
                 
-                result = {
-                    "is_alarm": True,
-                    "class": translated_class,
-                    "confidence": confidence_score,
+                result.update({
                     "urgency_level": urgency_level,
                     "urgency_confidence": float(urgency_confidence),
                     "description": description,
-                    "volume_level": volume_level,
                     "repetition_pattern": repetition_pattern,
-                    "context_sounds": context_sounds,
-                    "date": translated_date
-                }
+                    "translated_date": translated_date,
+                    "message": f"Alarma detectada: {description}"
+                })
+
+                # Save to Firebase if it's an alarm
+                if user_id:
+                    alarm_data = {
+                        "userId": user_id,
+                        "soundClass": predicted_class,
+                        "translatedClass": translated_class,
+                        "confidence": confidence_score,
+                        "urgencyLevel": urgency_level,
+                        "description": description,
+                        "timestamp": firestore.SERVER_TIMESTAMP,
+                        "location": location if location else None,
+                        "volumeLevel": volume_level,
+                        "status": "pending"
+                    }
+                    db.collection("alarms").add(alarm_data)
             
             return self._convert_to_native_types(result)
             
         except Exception as e:
-            raise ValueError(f"Error procesando archivo de audio: {str(e)}")
-
+            error_msg = f"Error procesando archivo de audio: {str(e)}"
+            if user_id:
+                error_data = {
+                    "userId": user_id,
+                    "error": error_msg,
+                    "timestamp": firestore.SERVER_TIMESTAMP
+                }
+                db.collection("error_logs").add(error_data)
+            raise ValueError(error_msg)
 
     def date_alert(self):  
         tz = pytz.timezone("America/Mexico_City")
