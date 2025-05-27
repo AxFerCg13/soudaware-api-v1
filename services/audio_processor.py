@@ -407,6 +407,9 @@ class AudioProcessor:
             # Verificar si el sonido es una alarma
             is_alarm = self.is_alarm_sound(predicted_class, context_sounds, confidence_score)
             
+            # Obtener fecha traducida
+            translated_date = self.translator.translate(self.date_alert(), src='en', dest='es').text
+            
             result = {
                 "is_alarm": is_alarm,
                 "class": translated_class,
@@ -414,8 +417,7 @@ class AudioProcessor:
                 "confidence": confidence_score,
                 "context_sounds": context_sounds,
                 "date": translated_date,
-                "volume_level": volume_level,
-                "timestamp": datetime.now(pytz.timezone("America/Mexico_City")).isoformat()
+                "volume_level": volume_level
             }
 
             if location:
@@ -436,14 +438,11 @@ class AudioProcessor:
                     predicted_class, volume_level, repetition_pattern, context_sounds
                 )
                 
-                translated_date = self.translator.translate(self.date_alert(), src='en', dest='es').text
-                
                 result.update({
                     "urgency_level": urgency_level,
                     "urgency_confidence": float(urgency_confidence),
                     "description": description,
                     "repetition_pattern": repetition_pattern,
-                    "translated_date": translated_date,
                     "message": f"Alarma detectada: {description}"
                 })
 
@@ -456,7 +455,7 @@ class AudioProcessor:
                             "confidence": confidence_score,
                             "urgencyLevel": urgency_level,
                             "description": description,
-                            "timestamp": translated_date,
+                            "date": translated_date,
                             "isAlarm": is_alarm,
                             "volumeLevel": volume_level,
                             "repetitionPattern": repetition_pattern,
