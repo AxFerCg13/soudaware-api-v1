@@ -7,6 +7,8 @@ import datetime
 import io
 import librosa
 import numpy as np
+import os
+import json
 from googletrans import Translator
 from deep_translator import GoogleTranslator
 from datetime import datetime
@@ -14,11 +16,11 @@ import pytz
 import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import firestore
+import logging
+from pathlib import Path
 
-# Initialize Firebase Admin (do this only once)
-cred = credentials.Certificate('./services/soundaware.json')  # <- Change this path
-firebase_admin.initialize_app(cred)
-db = firestore.client()
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 
 class SoundClassData:
     # Lista de alarmas / sonidos de emergencia
@@ -142,14 +144,114 @@ class SoundClassData:
         "Bell": "Campana sonando",
     }
 
-class AudioProcessor:
-    translator = Translator()
+# FUNCIONES AUXILIARES PARA FIREBASE
+def verify_credentials_file():
+    """Verifica que el archivo de credenciales existe y es válido"""
+    credential_paths = [
+        './services/soundaware.json',
+        './soundaware.json',
+        '../services/soundaware.json',
+        'services/soundaware.json'
+    ]
+    
+    for path in credential_paths:
+        if os.path.exists(path):
+            print(f"✅ Archivo encontrado en: {path}")
+            try:
+                with open(path, 'r') as f:
+                    data = json.load(f)
+                    required_fields = ['type', 'project_id', 'private_key_id', 'private_key', 'client_email']
+                    missing_fields = [field for field in required_fields if field not in data]
+                    
+                    if missing_fields:
+                        print(f"❌ Faltan campos requeridos: {missing_fields}")
+                        return None
+                    else:
+                        print(f"✅ Archivo de credenciales válido")
+                        return path
+            except Exception as e:
+                print(f"❌ Error leyendo archivo {path}: {e}")
+                continue
+        else:
+            print(f"❌ No encontrado: {path}")
+    
+    print("❌ No se encontró archivo de credenciales válido")
+    return None
 
+def safe_firebase_init():
+    """Inicializa Firebase de manera segura con manejo de errores"""
+    try:
+        if firebase_admin._apps:
+            print("✅ Firebase ya está inicializado")
+            return firestore.client()
+        
+        cred_path = verify_credentials_file()
+        if not cred_path:
+            raise Exception("No se encontró archivo de credenciales válido")
+        
+        cred = credentials.Certificate(cred_path)
+        firebase_admin.initialize_app(cred)
+        
+        db = firestore.client()
+        test_connection(db)
+        
+        print("✅ Firebase inicializado correctamente")
+        return db
+        
+    except Exception as e:
+        print(f"❌ Error inicializando Firebase: {e}")
+        return None
+
+def test_connection(db):
+    """Prueba la conexión con Firestore"""
+    try:
+        collections = db.collections()
+        collections_list = list(collections)
+        print(f"✅ Conexión exitosa. Colecciones disponibles: {len(collections_list)}")
+        return True
+    except Exception as e:
+        print(f"❌ Error de conexión: {e}")
+        raise e
+
+class AudioProcessor:
     def __init__(self, desired_sample_rate=16000):
         self.desired_sample_rate = desired_sample_rate
+        self.db = None
+        self.firebase_available = False
+        self.sound_data = SoundClassData()
+        self.translator = Translator()
+
+        # Configuración de logging
+
+        # Inicializar Firebase
+        self._init_firebase()
+
+        # Inicializar modelo
         self.model = hub.load('https://tfhub.dev/google/yamnet/1')
         self.class_names = self._load_class_names()
-        self.sound_data = SoundClassData()
+
+    def _init_firebase(self):
+        """Inicializa Firebase con manejo de errores basado en tu código que funciona"""
+        try:
+            if not firebase_admin._apps:
+                cred_path = verify_credentials_file()
+                if not cred_path:
+                    raise ValueError("No se encontró archivo de credenciales válido")
+                
+                cred = credentials.Certificate(cred_path)
+                firebase_admin.initialize_app(cred)
+            
+            self.db = firestore.client()
+            self.firebase_available = True
+            
+            # Probar conexión
+            try:
+                self.db.collection("test").limit(1).get()
+            except Exception as e:
+                self.firebase_available = False
+                
+        except Exception as e:
+            self.firebase_available = False
 
     def _load_class_names(self):
         class_map_path = self.model.class_map_path().numpy().decode('utf-8')
@@ -265,7 +367,8 @@ class AudioProcessor:
             return [self._convert_to_native_types(item) for item in data]
         return data
 
-    async def process_audio_file(self, audio_file, user_id=None, location=None):
+    async def process_audio_file(self, audio_file, location=None):
+        """Procesa el archivo de audio basado en tu implementación que funciona"""
         try:
             audio_bytes = audio_file.read()
             is_mp3 = False
@@ -310,7 +413,7 @@ class AudioProcessor:
                 "original_class": predicted_class,
                 "confidence": confidence_score,
                 "context_sounds": context_sounds,
-                "date": self.date_alert(),
+                "date": translated_date,
                 "volume_level": volume_level,
                 "timestamp": datetime.now(pytz.timezone("America/Mexico_City")).isoformat()
             }
@@ -344,33 +447,38 @@ class AudioProcessor:
                     "message": f"Alarma detectada: {description}"
                 })
 
-                # Save to Firebase if it's an alarm
-                if user_id:
-                    alarm_data = {
-                        "userId": user_id,
-                        "soundClass": predicted_class,
-                        "translatedClass": translated_class,
-                        "confidence": confidence_score,
-                        "urgencyLevel": urgency_level,
-                        "description": description,
-                        "timestamp": firestore.SERVER_TIMESTAMP,
-                        "location": location if location else None,
-                        "volumeLevel": volume_level,
-                        "status": "pending"
-                    }
-                    db.collection("alarms").add(alarm_data)
+                # Guardar en Firebase usando tu estructura que funciona
+                if self.firebase_available:
+                    try:
+                        alarm_data = {
+                            "soundClass": predicted_class,
+                            "translatedClass": translated_class,
+                            "confidence": confidence_score,
+                            "urgencyLevel": urgency_level,
+                            "description": description,
+                            "timestamp": translated_date,
+                            "isAlarm": is_alarm,
+                            "volumeLevel": volume_level,
+                            "repetitionPattern": repetition_pattern,
+                            "location": location if location else None,
+                            "metadata": {
+                                k: v for k, v in result.items() 
+                                if k not in ["class", "original_class", "confidence", "is_alarm", "urgency_level", "description"]
+                            }
+                        }
+                        
+                        _, doc_ref = self.db.collection("alarms").add(alarm_data)
+                        result["firestore_id"] = doc_ref.id
+                        
+                    except Exception as firestore_error:
+                        result["firestore_error"] = str(firestore_error)
+                else:
+                    result["firebase_warning"] = "Firebase no disponible"
             
             return self._convert_to_native_types(result)
             
         except Exception as e:
             error_msg = f"Error procesando archivo de audio: {str(e)}"
-            if user_id:
-                error_data = {
-                    "userId": user_id,
-                    "error": error_msg,
-                    "timestamp": firestore.SERVER_TIMESTAMP
-                }
-                db.collection("error_logs").add(error_data)
             raise ValueError(error_msg)
 
     def date_alert(self):  
