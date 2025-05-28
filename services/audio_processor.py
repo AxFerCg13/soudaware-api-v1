@@ -409,6 +409,9 @@ class AudioProcessor:
             
             # Obtener fecha traducida
             translated_date = self.translator.translate(self.date_alert(), src='en', dest='es').text
+
+            if translated_class == 'Silencio':
+                translated_class = 'Perturbación sonora' 
             
             result = {
                 "is_alarm": is_alarm,
